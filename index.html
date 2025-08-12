@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deriv Multi-Volatility Bot</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #2a2a72, #009ffd);
+      color: #fff;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      background: rgba(0,0,0,0.3);
+      padding: 20px;
+      text-align: center;
+      font-size: 1.8rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.4);
+    }
+
+    main {
+      flex-grow: 1;
+      max-width: 900px;
+      margin: 20px auto;
+      padding: 20px;
+      background: rgba(255 255 255 / 0.1);
+      border-radius: 10px;
+      box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+      display: flex;
+      flex-direction: column;
+    }
+
+    form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+      justify-content: center;
+    }
+
+    label {
+      flex: 1 1 140px;
+      display: flex;
+      flex-direction: column;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    input, select {
+      margin-top: 6px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: none;
+      font-size: 1rem;
+      outline: none;
+    }
+
+    button {
+      padding: 12px 30px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 8px;
+      background: #00ffc8;
+      color: #0d1b2a;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    button:hover {
+      background: #00bfa0;
+    }
+
+    #logs {
+      flex-grow: 1;
+      background: rgba(0,0,0,0.25);
+      border-radius: 8px;
+      padding: 12px;
+      overflow-y: auto;
+      font-family: 'Consolas', monospace;
+      font-size: 0.9rem;
+      line-height: 1.4;
+      max-height: 400px;
+      box-shadow: inset 0 0 10px #00ffc8aa;
+    }
+
+    .log-line {
+      margin-bottom: 4px;
+    }
+
+    .status {
+      color: #ffe066;
+      font-weight: 600;
+    }
+
+    .tradable {
+      color: #4ade80; /* green */
+      font-weight: 600;
+    }
+
+    .buying {
+      color: #38bdf8; /* blue */
+      font-weight: 600;
+    }
+
+    .opened {
+      color: #facc15; /* amber */
+      font-weight: 600;
+    }
+
+    .closed {
+      font-weight: 700;
+    }
+
+    .profit {
+      color: #22c55e; /* green */
+    }
+
+    .loss {
+      color: #ef4444; /* red */
+    }
+
+    .error {
+      color: #f87171; /* light red */
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <header>Deriv Multi-Volatility Bot</header>
+  <main>
+    <form id="configForm">
+      <label>
+        API Token
+        <input type="text" id="apiToken" placeholder="Enter your API token" required autocomplete="off" />
+      </label>
+      <label>
+        Base Stake (USD)
+        <input type="number" id="baseStake" value="100" min="1" required />
+      </label>
+      <label>
+        Contract Type
+        <select id="contractType" required>
+          <option value="DIGITOVER">DIGITOVER</option>
+          <option value="DIGITUNDER">DIGITUNDER</option>
+          <option value="DIGITMATCH">DIGITMATCH</option>
+        </select>
+      </label>
+      <label>
+        Digit Barrier
+        <input type="number" id="barrier" value="3" min="0" max="9" required />
+      </label>
+      <label style="flex-grow: 1; align-self: flex-end;">
+        <button type="submit">Start Bot</button>
+      </label>
+    </form>
+
+    <div id="logs" aria-live="polite" aria-atomic="true"></div>
+  </main>
+
+  <script>
+    const logs = document.getElementById('logs');
+    const form = document.getElementById('configForm');
+
+    let ws;
+
+    function addLog(message, cssClass = '') {
+      const p = document.createElement('div');
+      p.className = 'log-line ' + cssClass;
+      p.textContent = message;
+      logs.appendChild(p);
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+
+      if (ws) {
+        ws.close();
+      }
+
+      const apiToken = document.getElementById('apiToken').value.trim();
+      const baseStake = document.getElementById('baseStake').value.trim();
+      const contractType = document.getElementById('contractType').value;
+      const barrier = document.getElementById('barrier').value.trim();
+
+      if (!apiToken) {
+        alert('Please enter your API token.');
+        return;
+      }
+
+      // Connect WebSocket to backend server with query params
+      const wsUrl = `ws://${window.location.hostname}:3000?` + 
+        `token=${encodeURIComponent(apiToken)}&stake=${baseStake}&contract=${contractType}&barrier=${barrier}`;
+
+      ws = new WebSocket(wsUrl);
+
+      addLog('🔌 Connecting to bot...', 'status');
+
+      ws.onopen = () => {
+        addLog('✅ Connected to bot backend', 'status');
+      };
+
+      ws.onerror = (err) => {
+        addLog('❌ WebSocket error: ' + err.message, 'error');
+      };
+
+      ws.onclose = () => {
+        addLog('⚠️ Disconnected from bot backend', 'status');
+      };
+
+      ws.onmessage = (event) => {
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          addLog(event.data, 'status');
+          return;
+        }
+
+        switch (data.type) {
+          case 'status':
+            addLog('⚡ ' + data.message, 'status');
+            break;
+          case 'tradable':
+            addLog(data.message, 'tradable');
+            break;
+          case 'buying':
+            addLog(data.message, 'buying');
+            break;
+          case 'opened':
+            addLog(`🎯 Opened contract ID ${data.contractId} for ${data.symbol}`, 'opened');
+            break;
+          case 'closed':
+            const profitLossClass = data.profit >= 0 ? 'profit' : 'loss';
+            addLog(`🏁 Closed ${data.symbol} | P/L: $${data.profit.toFixed(2)} | Net: $${data.netProfit.toFixed(2)}`, 'closed ' + profitLossClass);
+            break;
+          case 'error':
+            addLog('❌ Error: ' + data.message, 'error');
+            break;
+          default:
+            addLog(JSON.stringify(data), 'status');
+            break;
+        }
+      };
+    });
+  </script>
+</body>
+</html>
